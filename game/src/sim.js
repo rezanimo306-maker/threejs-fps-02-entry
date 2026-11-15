@@ -7,13 +7,13 @@ import {
   PLANT_MONEY, PLAYER_HEALTH, PLAYER_RADIUS,
 } from './config.js';
 import { createBot, botBuy, stepBot } from './bots.js';
-import { stepPlayer, createPlayerInput } from './player.js';
+import { stepPlayer } from './player.js';
 import { shoot, explodeGrenade } from './combat.js';
 import {
   giveWeapon, buyWeapon, buyArmor, switchWeapon,
   startReload, finishReload, recoverWeapon, throwGrenade, consumeShot,
 } from './weapons.js';
-import { groundHeightAt, segmentBlocked } from './world.js';
+import { segmentBlocked } from './world.js';
 import * as audio from './audio.js';
 
 export const STEP = 1 / 60;
@@ -84,10 +84,12 @@ export function makeEntity(id, team, isPlayer, spawn, skill) {
     hp: PLAYER_HEALTH, armor: false, alive: true,
     weapon: 'pistol', primary: 'pistol', sidearm: 'pistol',
     mag: 12, reserve: 48, grenades: 0, bloom: 0, recoil: 0,
+    ammo: { pistol: { mag: 12, reserve: 48 } }, // per-weapon ammunition
     reloading: false, reloadEnd: 0, lastShot: -10,
     money: START_MONEY, kills: 0, deaths: 0,
     crouched: false, onGround: true, moving: 0, height: 1.7,
-    hasBomb: false, planting: 0, defusing: 0,
+    hasBomb: false, planting: 0, defusing: 0, scoped: false,
+    stepAcc: 0, lastDryAt: -10, assignedSite: null,
     lastDamageFrom: null, lastDamageAt: -10,
   };
   if (!isPlayer) return createBot(id, team, spawn, skill, base.name);
@@ -148,9 +150,16 @@ export function startRound(sim) {
     e.crouched = false;
     if (e.isBot) botBuy(e, sim.rng);
   }
-  // The bomb goes to a random Vanguard bot with a random site.
-  const carriers = sim.entities.filter((e) => e.team === 'vanguard' && e.isBot);
-  const carrier = carriers[Math.floor(sim.rng() * carriers.length)];
+  // The bomb goes to a Vanguard attacker: usually a bot, but in about two
+  // rounds out of five it is the player, so the human can run the objective
+  // instead of waiting for a bot to drop the charge.
+  const attackers = sim.entities.filter((e) => e.team === 'vanguard');
+  let carrier;
+  if (sim.player && sim.rng() < 0.4) carrier = sim.player;
+  else {
+    const bots = attackers.filter((e) => e.isBot);
+    carrier = bots[Math.floor(sim.rng() * bots.length)];
+  }
   carrier.hasBomb = true;
   carrier.assignedSite = sim.rng() < 0.5 ? 'A' : 'B';
   sim.bomb = { state: 'carried', carrier, x: carrier.pos.x, z: carrier.pos.z, site: null, timer: 0 };
@@ -321,6 +330,8 @@ export function step(sim, input, dt) {
       endRound(sim, 'vanguard', 'Charge detonated');
       return;
     }
+    // The planted charge beeps once a second while it ticks down.
+    if (Math.floor(sim.bomb.timer) !== Math.floor(sim.bomb.timer + dt)) audio.playBeep();
   }
 
   const player = sim.player;
@@ -329,9 +340,19 @@ export function step(sim, input, dt) {
   if (player.alive) {
     player.scoped = player.weapon === 'sniper' && !!input.scoping;
     stepPlayer(sim, player, input, dt);
+    // Footsteps: a soft step every ~2.4 m on the ground.
+    player.stepAcc += player.moving * dt;
+    if (player.onGround && player.stepAcc > 2.4) { player.stepAcc = 0; audio.playStep(); }
     handlePlayerKeys(sim, player, input);
     if (input.firing && player.weapon !== 'grenade') {
-      shoot(sim, player, sim.time);
+      const res = shoot(sim, player, sim.time);
+      // Dry-fire click on an empty magazine, throttled so holding the
+      // trigger does not rattle.
+      if (res === 'dry' && player.mag === 0 && !player.reloading
+        && sim.time - player.lastDryAt > 0.35) {
+        player.lastDryAt = sim.time;
+        audio.playDryFire();
+      }
     } else if (input.firing && player.weapon === 'grenade') {
       input.firing = false;
       if (consumeShot(player, sim.time)) {
@@ -422,16 +443,16 @@ export function step(sim, input, dt) {
 function handleBuyKeys(sim, input) {
   const p = sim.player;
   if (!p) return;
-  if (input.keys.has('Digit1')) { buyWeapon(p, 'rifle'); input.keys.delete('Digit1'); }
-  if (input.keys.has('Digit2')) { buyWeapon(p, 'smg'); input.keys.delete('Digit2'); }
-  if (input.keys.has('Digit3')) { buyWeapon(p, 'shotgun'); input.keys.delete('Digit3'); }
-  if (input.keys.has('Digit4')) { buyWeapon(p, 'sniper'); input.keys.delete('Digit4'); }
-  if (input.keys.has('Digit5')) { buyWeapon(p, 'grenade'); input.keys.delete('Digit5'); }
-  if (input.keys.has('Digit6')) { buyArmor(p); input.keys.delete('Digit6'); }
+  if (input.keys.has('Digit1')) { if (buyWeapon(p, 'rifle')) audio.playBuy(); input.keys.delete('Digit1'); }
+  if (input.keys.has('Digit2')) { if (buyWeapon(p, 'smg')) audio.playBuy(); input.keys.delete('Digit2'); }
+  if (input.keys.has('Digit3')) { if (buyWeapon(p, 'shotgun')) audio.playBuy(); input.keys.delete('Digit3'); }
+  if (input.keys.has('Digit4')) { if (buyWeapon(p, 'sniper')) audio.playBuy(); input.keys.delete('Digit4'); }
+  if (input.keys.has('Digit5')) { if (buyWeapon(p, 'grenade')) audio.playBuy(); input.keys.delete('Digit5'); }
+  if (input.keys.has('Digit6')) { if (buyArmor(p)) audio.playBuy(); input.keys.delete('Digit6'); }
 }
 
 function handlePlayerKeys(sim, player, input) {
-  if (input.keys.has('KeyR')) { startReload(player, sim.time); input.keys.delete('KeyR'); }
+  if (input.keys.has('KeyR')) { if (startReload(player, sim.time)) audio.playReload(); input.keys.delete('KeyR'); }
   if (input.keys.has('Digit1')) { switchWeapon(player, 'primary'); input.keys.delete('Digit1'); }
   if (input.keys.has('Digit2')) { switchWeapon(player, 'sidearm'); input.keys.delete('Digit2'); }
   if (input.keys.has('Digit3')) { switchWeapon(player, 'grenade'); input.keys.delete('Digit3'); }
