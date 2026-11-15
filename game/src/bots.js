@@ -118,11 +118,24 @@ export function stepBot(sim, bot, dt, now, rng) {
     // place: a bot that stands still trading shots across the map never
     // reaches the objective, and the round stalls on time. Defenders
     // hold their angle and strafe — they let the push come to them.
+    // And a bot plants its feet while its burst is firing: moving
+    // multiplies spread by ~2.4, so a bot that strafed through every
+    // burst lost every long-range duel to a stationary defender holding
+    // the angle — the push died in mid-map for it. Stopping to aim pays,
+    // so the bot only moves between bursts.
+    const firingNow = now > bot.burstPauseUntil && bot.burstLeft > 0
+      && now - bot.firstSeenAt > 0.25 + (1 - bot.skill) * 0.45;
     const strafe = Math.sin(now * 0.9 + bot.id * 2.1) > 0.2 ? 1 : -1;
     const advance = bot.team === 'vanguard' && dist > 15 ? 0.9 : 0;
     const mx = Math.cos(bot.yaw) * strafe + (dx / dist) * advance;
     const mz = -Math.sin(bot.yaw) * strafe + (dz / dist) * advance;
-    moveBot(sim, bot, mx, mz, dt, RUN_SPEED * 0.55);
+    if (firingNow) {
+      // Feet planted: zero the velocity too, or the stale strafe speed
+      // still counts as moving for the spread penalty.
+      bot.vel.x = 0; bot.vel.z = 0;
+    } else {
+      moveBot(sim, bot, mx, mz, dt, RUN_SPEED * 0.55);
+    }
     // Lob a grenade at a distant target instead of trading rifle shots at
     // 8–25 m: bots used to buy grenades every round and never throw one.
     if (bot.grenades > 0 && dist > 8 && dist < 25 && now > bot.nextGrenadeAt) {
