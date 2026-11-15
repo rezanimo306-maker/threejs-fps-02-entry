@@ -63,6 +63,8 @@ export function updateHud(hud, sim, input) {
   hud.round.textContent = `ROUND ${sim.round}`;
 
   // Crosshair: gap grows with spread, so stopping to aim is visible.
+  // Hidden while dead (spectating a teammate needs no crosshair).
+  hud.crosshair.style.display = p.alive ? '' : 'none';
   const spread = p.weapon === 'grenade' ? 0 : 6 + (p.bloom || 0) * 6 + (p.moving > 0.6 ? 6 : 0);
   hud.crosshair.style.setProperty('--gap', `${spread.toFixed(1)}px`);
 

@@ -185,12 +185,27 @@ export function syncRender(rs, sim, dt, now) {
   }
 
   // First-person camera: feet + eye height, yaw/pitch + recoil kick.
-  const eye = p.pos.y + (p.crouched ? 1.15 : 1.7);
-  cam.position.set(p.pos.x, eye, p.pos.z);
-  cam.rotation.order = 'YXZ';
-  cam.rotation.y = p.yaw;
-  cam.rotation.x = p.pitch + (p.recoil || 0);
-  cam.rotation.z = 0;
+  // Dead players spectate a living Vanguard teammate instead of staring
+  // at the floor where they fell: the round plays on for up to 100 s,
+  // and a frozen death cam wastes all of it.
+  if (!p.alive) {
+    const spec = sim.entities.find((e) => e.team === 'vanguard' && e.isBot && e.alive);
+    if (spec) {
+      const eye = spec.pos.y + (spec.crouched ? 1.15 : 1.7);
+      cam.position.set(spec.pos.x, eye, spec.pos.z);
+      cam.rotation.order = 'YXZ';
+      cam.rotation.y = spec.yaw;
+      cam.rotation.x = spec.pitch;
+      cam.rotation.z = 0;
+    }
+  } else {
+    const eye = p.pos.y + (p.crouched ? 1.15 : 1.7);
+    cam.position.set(p.pos.x, eye, p.pos.z);
+    cam.rotation.order = 'YXZ';
+    cam.rotation.y = p.yaw;
+    cam.rotation.x = p.pitch + (p.recoil || 0);
+    cam.rotation.z = 0;
+  }
   // Sniper scope narrows the view.
   const targetFov = p.scoped && p.weapon === 'sniper' ? 32 : 75;
   if (Math.abs(cam.fov - targetFov) > 0.1) {
