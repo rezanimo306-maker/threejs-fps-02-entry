@@ -135,6 +135,10 @@ export function shoot(sim, shooter, now) {
     const r = firePellet(sim, shooter, dir, now);
     if (r.hit) { anyHit = true; if (r.head) anyHead = true; }
   }
+  // Hit feedback for the human player: the HUD hitmarker and its tick.
+  // (The hook was wired in main.js but never called, so hits landed with
+  // no marker at all.)
+  if (shooter.isPlayer && anyHit && sim.onHit) sim.onHit(anyHead);
   sim.onShotFired(shooter);
   return anyHead ? 'head' : anyHit ? 'hit' : 'miss';
 }

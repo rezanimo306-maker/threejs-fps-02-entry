@@ -3,7 +3,7 @@
 // objective (plant for Vanguard, defuse for Ember).
 import { RUN_SPEED, CROUCH_SPEED, PLAYER_RADIUS, PLANT_TIME, DEFUSE_TIME } from './config.js';
 import { findRoute, segmentBlocked, groundHeightAt, resolveMove } from './world.js';
-import { buyWeapon, buyArmor, giveWeapon, startReload, finishReload } from './weapons.js';
+import { buyWeapon, buyArmor, giveWeapon, startReload, finishReload, throwGrenade, consumeShot } from './weapons.js';
 import { shoot } from './combat.js';
 
 const CALLSIGNS = ['Ghost', 'Viper', 'Havoc', 'Blitz', 'Rook', 'Nomad', 'Frost', 'Onyx', 'Wraith', 'Sable'];
@@ -27,6 +27,7 @@ export function createBot(id, team, spawn, skill, name) {
     holdUntil: 0, holdPos: null, thinkAt: 0, aimYaw: 0, aimPitch: 0,
     assignedSite: null, hasBomb: false, planting: 0, defusing: 0,
     investigate: null, lastDamageFrom: null, lastDamageAt: -10,
+    nextGrenadeAt: 0,
   };
 }
 
@@ -122,6 +123,14 @@ export function stepBot(sim, bot, dt, now, rng) {
     const mx = Math.cos(bot.yaw) * strafe + (dx / dist) * advance;
     const mz = -Math.sin(bot.yaw) * strafe + (dz / dist) * advance;
     moveBot(sim, bot, mx, mz, dt, RUN_SPEED * 0.55);
+    // Lob a grenade at a distant target instead of trading rifle shots at
+    // 8–25 m: bots used to buy grenades every round and never throw one.
+    if (bot.grenades > 0 && dist > 8 && dist < 25 && now > bot.nextGrenadeAt) {
+      if (consumeShot(bot, now)) {
+        throwGrenade(sim, bot);
+        bot.nextGrenadeAt = now + 12 + rng() * 8;
+      }
+    }
     if (now > bot.burstPauseUntil) {
       if (bot.burstLeft <= 0) {
         bot.burstLeft = 3 + Math.floor(rng() * 3);
@@ -201,21 +210,44 @@ function moveBot(sim, bot, dx, dz, dt, speed) {
 }
 
 function think(sim, bot, now, rng) {
-  // Bomb states override routing.
+  // A planted charge does not end the fight. Round 2's bots went passive
+  // the moment the charge was planted — no bot on either side fired
+  // again, so every plant detonated unopposed and no defuse ever
+  // happened. A bot that can see an enemy engages first; only then does
+  // it fall back to the objective.
   if (sim.bomb.state === 'planted') {
+    const seen = nearestVisible(sim, bot);
+    if (seen) {
+      if (bot.target !== seen.ent) { bot.target = seen.ent; bot.firstSeenAt = now; }
+      bot.state = 'engage';
+      bot.planting = 0; bot.defusing = 0;
+      return;
+    }
+    bot.target = null;
+    const d = Math.hypot(sim.bomb.x - bot.pos.x, sim.bomb.z - bot.pos.z);
     if (bot.team === 'ember') {
-      const d = Math.hypot(sim.bomb.x - bot.pos.x, sim.bomb.z - bot.pos.z);
       if (d < 2.2) {
         // Start the defuse once: resetting defusing on every think tick
         // would never let it reach DEFUSE_TIME.
         if (bot.state !== 'defuse') { bot.state = 'defuse'; bot.defusing = 0; }
         return;
       }
+      // Close the last metres on foot: the waypoint graph only routes to
+      // the site's waypoint, which can sit 3–4 m from the planted charge,
+      // so a bot routed there looped at the waypoint and never defused.
+      if (d < 6) { bot.state = 'fetch'; return; }
       bot.state = 'route';
       routeTo(sim, bot, sim.bomb.x, sim.bomb.z);
       return;
     }
-    // Vanguard holds the planted site.
+    // Vanguard defends the planted site: rotate back when far away,
+    // hold the angle once close. Holding wherever the bot happened to
+    // stand left the site undefended.
+    if (d > 9) {
+      bot.state = 'route';
+      routeTo(sim, bot, sim.bomb.x, sim.bomb.z);
+      return;
+    }
     bot.state = 'hold';
     return;
   }
@@ -236,7 +268,11 @@ function think(sim, bot, now, rng) {
       if (dd < nd) { nd = dd; nearest = e; }
     }
     if (nearest === bot) {
-      if (nd < 5) { bot.state = 'fetch'; return; }
+      // Steer straight at the charge inside 8 m: the waypoint graph only
+      // routes to the nearest waypoint, which can sit several metres from
+      // a dropped charge, and the bot looped there instead of picking it
+      // up.
+      if (nd < 8) { bot.state = 'fetch'; return; }
       bot.state = 'route';
       routeTo(sim, bot, sim.bomb.x, sim.bomb.z);
       return;
@@ -244,9 +280,12 @@ function think(sim, bot, now, rng) {
   }
   if (seen) {
     // The charge carrier pushes to the site and only stops for a fight
-    // close enough to threaten the plant (14 m: a defender further out
-    // is a long-range trade the carrier can survive while closing).
-    const pushing = bot.hasBomb && bot.assignedSite && seen.dist > 14;
+    // close enough to threaten the plant — but not through gunfire aimed
+    // at it: a carrier that kept walking while being shot died in
+    // mid-map, 17–33 m short of the site, in most rounds. Under fire it
+    // stops and returns fire, and it engages anyone inside 18 m.
+    const underFire = now - bot.lastDamageAt < 2;
+    const pushing = bot.hasBomb && bot.assignedSite && seen.dist > 18 && !underFire;
     if (!pushing) {
       if (bot.target !== seen.ent) { bot.target = seen.ent; bot.firstSeenAt = now; }
       bot.state = 'engage';
