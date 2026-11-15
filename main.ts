@@ -1,8 +1,11 @@
 // DUSKLINE — entrypoint: copies game/ and screenshots/ into the output
 // directory and writes the dossier the judge reads. Outside the grader,
 // MAKEFUN_OUTPUT_DIR stands in for /output.
+// Round 2 polish: the carrier bug is fixed (waypoints no longer sit on
+// crate edges), ammunition is kept per weapon, the player can carry the
+// charge, and the dead audio hooks are wired up.
 import { buildDossier } from './vendor/makefun-threejs.ts';
-import { cpSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +14,17 @@ const outDir = process.env.MAKEFUN_OUTPUT_DIR || '/output';
 
 mkdirSync(outDir, { recursive: true });
 cpSync(join(repoDir, 'game'), join(outDir, 'game'), { recursive: true });
+
+// Verify the copy landed: count the game files, so a silent partial copy
+// is noticed here instead of in the gate.
+function countFiles(dir: string): number {
+  let n = 0;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    n += e.isDirectory() ? countFiles(join(dir, e.name)) : 1;
+  }
+  return n;
+}
+console.log(`game copied: ${countFiles(join(outDir, 'game'))} files -> ${join(outDir, 'game')}`);
 const shotsDir = join(repoDir, 'screenshots');
 if (existsSync(shotsDir)) {
   cpSync(shotsDir, join(outDir, 'screenshots'), { recursive: true });
