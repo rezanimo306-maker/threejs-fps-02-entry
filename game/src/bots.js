@@ -328,17 +328,22 @@ function think(sim, bot, now, rng) {
   // Attackers follow the charge carrier so the plant is a team push, not
   // a lone walk into two defenders — and they clear AHEAD of it. The
   // carrier used to walk point into every held angle and die in mid-map,
-  // 17–33 m short of the site, while its escorts trailed behind it. Now
-  // the escorts route to a point 6 m past the carrier toward the site, so
-  // the carrier is never the first bot into a defender's sightline.
+  // 17–33 m short of the site, while its escorts trailed behind it. The
+  // escorts target the waypoint 1–2 nodes ahead of the carrier on its
+  // own route, so they take the same lane: a Euclidean point 6 m past
+  // the carrier can sit inside a wall (the mid wall at the door), and
+  // the escort would route to a waypoint on the wrong side of it.
   if (bot.team === 'vanguard' && !bot.hasBomb) {
     const carrier = sim.entities.find((e) => e.team === 'vanguard' && e.hasBomb);
     if (carrier && carrier.assignedSite) {
-      const s = sim.sites[carrier.assignedSite];
-      const dx = s.x - carrier.pos.x; const dz = s.z - carrier.pos.z;
-      const dl = Math.hypot(dx, dz) || 1;
-      const tx = carrier.pos.x + (dx / dl) * 6;
-      const tz = carrier.pos.z + (dz / dl) * 6;
+      let tx; let tz;
+      if (carrier.route && carrier.route.length > 0) {
+        const ahead = Math.min(carrier.routeIdx + 1, carrier.route.length - 1);
+        const wp = sim.waypoints[carrier.route[ahead]];
+        tx = wp.x; tz = wp.z;
+      } else {
+        tx = carrier.pos.x; tz = carrier.pos.z;
+      }
       const dc = Math.hypot(tx - bot.pos.x, tz - bot.pos.z);
       if (dc > 3) {
         bot.state = 'route';
