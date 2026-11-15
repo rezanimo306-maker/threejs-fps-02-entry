@@ -29,6 +29,10 @@ export function giveWeapon(ent, key) {
   }
   ent.bloom = 0;
   ent.reloading = false;
+  // A fresh weapon has not fired: clear the last-shot time so the
+  // viewmodel flash (driven by lastShot) never shows a stale flash from
+  // the weapon just put away.
+  ent.lastShot = -10;
 }
 
 export function buyWeapon(ent, key) {

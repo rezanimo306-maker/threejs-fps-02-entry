@@ -187,8 +187,17 @@ function pushEvent(sim, text, team) {
 
 export function onShotFired(sim, shooter) {
   sim.lastShotPos = { x: shooter.pos.x, z: shooter.pos.z, team: shooter.team, at: sim.time };
-  const eye = shooter.pos.y + (shooter.crouched ? 1.15 : 1.7);
-  poolAdd(sim.flashes, (f) => { f.x = shooter.pos.x; f.y = eye; f.z = shooter.pos.z; });
+  // The flash sits at the muzzle: forward along the shot direction at gun
+  // height, not at the shooter's eye (R3 put it at eye height, so a bot
+  // flash would hover above its head). byPlayer lets the renderer skip
+  // the player's own flash — the viewmodel flash covers that one.
+  const dirX = -Math.sin(shooter.yaw), dirZ = -Math.cos(shooter.yaw);
+  poolAdd(sim.flashes, (f) => {
+    f.x = shooter.pos.x + dirX * 0.7;
+    f.y = shooter.pos.y + 1.15;
+    f.z = shooter.pos.z + dirZ * 0.7;
+    f.byPlayer = !!shooter.isPlayer;
+  });
   if (shooter.isPlayer) audio.playShot(shooter.weapon);
   else if (sim.player && sim.player.alive) {
     const d = Math.hypot(shooter.pos.x - sim.player.pos.x, shooter.pos.z - sim.player.pos.z);

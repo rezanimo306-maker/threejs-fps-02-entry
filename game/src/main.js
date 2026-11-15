@@ -141,5 +141,5 @@ window.__DUSKLINE__ = {
   // Freeze the page's own loop so a test can drive the sim step by step.
   pause: (v) => { paused = v; },
   step: (n = 1) => { for (let i = 0; i < n; i++) step(sim, input, STEP); },
-  version: '0.3.0',
+  version: '0.4.0',
 };

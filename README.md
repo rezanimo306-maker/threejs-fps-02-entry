@@ -62,3 +62,39 @@ never reached a site. The fixes, all verified in headless Chrome:
 In bot-only test rounds the carrier now reaches the site and plants (about
 1 in 5 rounds in a 4-v-5 test with the player dead; the charge detonates),
 where round 1 planted 0 in 5 and the carrier never left its spawn.
+
+## Round 4 — presentation and game feel
+
+Round 3 played well but looked empty: the cover screenshot was the menu, no
+enemy was visible in any screenshot, and the pistol used the rifle's
+viewmodel. Round 4 is a visual and feel pass over the same game — no
+balance, map layout, waypoint or economy change.
+
+- **Screenshots are gameplay, not the menu.** All four are live renders of
+  a round in progress, with enemy bots, tracers and a site in frame.
+- **One viewmodel per weapon.** Rifle, SMG, shotgun, sniper (with scope),
+  pistol and grenade each have their own first-person model — the pistol is
+  a small slide and grip held lower, the shotgun is wide with a pump, the
+  sniper is long with a scope. The model switches on weapon change.
+- **Bot guns point the right way.** R3 mounted the bot gun at local +z,
+  which is backwards under the yaw convention (local -z is forward), so
+  bots carried their gun on their back. The gun, arms and visor are now on
+  the -z side. Bots also gained arms holding the gun, a backpack and a
+  team-coloured visor strip, so facing reads at a glance.
+- **Bot muzzle flashes.** The sim already recorded every shot in a flash
+  pool and R3 never drew it; the pool is now rendered as starburst
+  billboards at the muzzle (forward along the shot direction, gun height),
+  so a firefight is visible from across the yard. The player's own flash
+  is skipped here — the viewmodel flash covers it.
+- **Canvas textures, no files.** Ground (sand, panel seams, stains, tyre
+  scuffs), centre lane (dashed amber line), walls (concrete panels),
+  crates (planks) and containers (corrugation, stencil code, rust streaks)
+  are painted once at load on runtime canvases.
+- **Floodlights and stars.** Four poles with warm lamps, glow halos and
+  point lights sit off the lanes and waypoints (solid, so nobody walks
+  through a mast); the dusk sky gained ~260 fixed stars.
+- **Damage direction.** A red wedge at the screen centre now points at the
+  attacker when the player is hurt, next to the damage flash.
+- **Buy menu names match the weapons.** The menu said KR-9 / M870 / AWP-7
+  while the HUD said K9 / M12 / L86; the menu now uses the weapon table's
+  names (K9 SMG, M12 Scattergun, L86 Longshot).

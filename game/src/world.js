@@ -110,6 +110,124 @@ function material(color) {
   return m;
 }
 
+// --- runtime canvas textures: the yard's surfaces are painted once at
+// load (no files, no network), so flat colour blocks read as a place. ---
+function canvasTexture(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+function hexCss(n) {
+  return `#${n.toString(16).padStart(6, '0')}`;
+}
+function speckle(g, w, h, n, dark, light) {
+  for (let i = 0; i < n; i++) {
+    const v = Math.random();
+    g.fillStyle = v < 0.5 ? dark : light;
+    g.globalAlpha = 0.05 + Math.random() * 0.12;
+    const s = 1 + Math.random() * 3;
+    g.fillRect(Math.random() * w, Math.random() * h, s, s);
+  }
+  g.globalAlpha = 1;
+}
+// Ground: sand with concrete panel seams, stains and tyre scuffs.
+function groundTexture() {
+  return canvasTexture(512, 512, (g, w, h) => {
+    g.fillStyle = hexCss(PALETTE.ground); g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 2600, '#5d4f3c', '#a08e72');
+    // Panel seams every 128 px.
+    g.strokeStyle = 'rgba(40,30,20,0.35)'; g.lineWidth = 3;
+    for (let x = 0; x <= w; x += 128) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+    for (let y = 0; y <= h; y += 128) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+    // Dark stains.
+    for (let i = 0; i < 9; i++) {
+      g.fillStyle = 'rgba(30,24,18,0.16)';
+      g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, 20 + Math.random() * 45, 12 + Math.random() * 26, Math.random() * 3, 0, Math.PI * 2); g.fill();
+    }
+    // Tyre scuffs: two curved dark arcs.
+    g.strokeStyle = 'rgba(35,28,20,0.28)'; g.lineWidth = 7;
+    for (let i = 0; i < 3; i++) {
+      g.beginPath(); g.arc(Math.random() * w, Math.random() * h, 60 + Math.random() * 60, Math.random() * 3, Math.random() * 2 + 1); g.stroke();
+    }
+  });
+}
+// Centre lane: darker asphalt with a dashed amber centre line.
+function laneTexture() {
+  return canvasTexture(128, 512, (g, w, h) => {
+    g.fillStyle = hexCss(PALETTE.groundDark); g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 500, '#4a3d2c', '#7d6c52');
+    g.fillStyle = '#c9a86a';
+    for (let y = 0; y < h; y += 64) g.fillRect(w / 2 - 3, y + 8, 6, 34);
+  });
+}
+// Wall: concrete panels with seams and a darker base band.
+function wallTexture() {
+  return canvasTexture(256, 256, (g, w, h) => {
+    g.fillStyle = hexCss(PALETTE.wall); g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 900, '#46545c', '#6d7d85');
+    g.strokeStyle = 'rgba(30,38,44,0.5)'; g.lineWidth = 4;
+    for (let x = 0; x <= w; x += 64) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+    g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+    g.fillStyle = 'rgba(20,26,30,0.35)'; g.fillRect(0, h - 26, w, 26);
+  });
+}
+// Crate: planks with a nailed frame.
+function crateTexture() {
+  return canvasTexture(128, 128, (g, w, h) => {
+    g.fillStyle = hexCss(PALETTE.crate); g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 260, '#7a5f38', '#b5935e');
+    g.strokeStyle = 'rgba(60,44,22,0.55)'; g.lineWidth = 3;
+    for (let y = 0; y <= h; y += 32) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+    g.lineWidth = 6; g.strokeRect(3, 3, w - 6, h - 6);
+  });
+}
+// Container: corrugated steel with a stencil code and rust streaks.
+// One texture per colour, cached; the stencil code is the box index.
+const _containerTex = new Map();
+function containerTexture(color, label) {
+  const key = `${color}:${label}`;
+  let t = _containerTex.get(key);
+  if (t) return t;
+  t = canvasTexture(256, 128, (g, w, h) => {
+    g.fillStyle = hexCss(color); g.fillRect(0, 0, w, h);
+    // Corrugation: alternating light/dark vertical ridges.
+    for (let x = 0; x < w; x += 16) {
+      g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(x, 0, 5, h);
+      g.fillStyle = 'rgba(0,0,0,0.16)'; g.fillRect(x + 8, 0, 5, h);
+    }
+    // Top and bottom rails.
+    g.fillStyle = 'rgba(0,0,0,0.30)'; g.fillRect(0, 0, w, 10); g.fillRect(0, h - 10, w, 10);
+    // Rust streaks from the top rail.
+    for (let i = 0; i < 7; i++) {
+      g.fillStyle = 'rgba(90,40,20,0.28)';
+      const x = Math.random() * w;
+      g.fillRect(x, 10, 3 + Math.random() * 4, 18 + Math.random() * 40);
+    }
+    // Stencil code.
+    g.fillStyle = 'rgba(255,255,255,0.75)';
+    g.font = 'bold 26px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(label, w / 2, h / 2 + 2);
+  });
+  t.repeat.set(2, 1);
+  _containerTex.set(key, t);
+  return t;
+}
+const _texMatCache = new Map();
+function texturedMaterial(color, tex) {
+  const key = `${color}:${tex.uuid}`;
+  let m = _texMatCache.get(key);
+  if (!m) {
+    m = new THREE.MeshLambertMaterial({ color, map: tex });
+    _texMatCache.set(key, m);
+  }
+  return m;
+}
+
 function letterTexture(letter, color) {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
@@ -154,17 +272,21 @@ export function buildWorld(scene) {
   group.add(sun);
 
   // Ground: sand with a darker centre lane.
+  const groundTex = groundTexture();
+  groundTex.repeat.set(4, 3);
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(66, 54),
-    new THREE.MeshLambertMaterial({ color: PALETTE.ground }),
+    new THREE.MeshLambertMaterial({ map: groundTex }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, 0, 2);
   ground.receiveShadow = true;
   group.add(ground);
+  const laneTex = laneTexture();
+  laneTex.repeat.set(1, 6);
   const lane = new THREE.Mesh(
     new THREE.PlaneGeometry(8, 54),
-    new THREE.MeshLambertMaterial({ color: PALETTE.groundDark }),
+    new THREE.MeshLambertMaterial({ map: laneTex }),
   );
   lane.rotation.x = -Math.PI / 2;
   lane.position.set(0, 0.01, 2);
@@ -188,11 +310,22 @@ export function buildWorld(scene) {
   }
 
   // Obstacles: one shared box geometry, scaled per instance.
+  // Textured where it reads: containers get corrugation + stencil, walls
+  // get concrete panels, crates get planks; barrels stay plain.
+  const wallTex = wallTexture();
+  wallTex.repeat.set(3, 1);
+  const crateTex = crateTexture();
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   const cylGeo = new THREE.CylinderGeometry(0.6, 0.6, 1, 12);
   const colliders = [];
-  for (const b of BOXES) {
-    const mesh = new THREE.Mesh(b.round ? cylGeo : boxGeo, material(b.c));
+  for (let bi = 0; bi < BOXES.length; bi++) {
+    const b = BOXES[bi];
+    let mat;
+    if (b.round) mat = material(b.c);
+    else if (b.h >= 4.5) mat = texturedMaterial(b.c, wallTex);
+    else if (b.c === PALETTE.crate) mat = texturedMaterial(b.c, crateTex);
+    else mat = texturedMaterial(b.c, containerTexture(b.c, `Y7-${String(bi + 1).padStart(2, '0')}`));
+    const mesh = new THREE.Mesh(b.round ? cylGeo : boxGeo, mat);
     mesh.scale.set(b.w, b.h, b.d);
     mesh.position.set(b.x, b.h / 2, b.z);
     mesh.castShadow = true;
@@ -204,6 +337,64 @@ export function buildWorld(scene) {
       top: b.h,
     });
   }
+
+  // Floodlight poles: off the lanes and waypoints (so no bot routes into
+  // one), solid so nobody walks through the mast. Each carries a warm
+  // lamp and a glow halo.
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
+  const glowTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,214,150,0.85)');
+    grad.addColorStop(0.4, 'rgba(255,180,90,0.28)');
+    grad.addColorStop(1, 'rgba(255,180,90,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
+  const poleGeo = new THREE.CylinderGeometry(0.12, 0.16, 7, 8);
+  const lampGeo = new THREE.BoxGeometry(0.9, 0.22, 0.4);
+  for (const [px, pz] of [[-8, 18], [8, 18], [-8, -16], [8, -16]]) {
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.set(px, 3.5, pz);
+    pole.castShadow = true;
+    group.add(pole);
+    const lamp = new THREE.Mesh(lampGeo, lampMat);
+    lamp.position.set(px, 7.0, pz);
+    group.add(lamp);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTex, transparent: true, depthWrite: false,
+    }));
+    halo.scale.set(5, 5, 1);
+    halo.position.set(px, 6.9, pz);
+    group.add(halo);
+    const pl = new THREE.PointLight(0xffc27a, 24, 24, 1.8);
+    pl.position.set(px, 6.6, pz);
+    group.add(pl);
+    colliders.push({ minX: px - 0.2, maxX: px + 0.2, minZ: pz - 0.2, maxZ: pz + 0.2, top: 7 });
+  }
+
+  // Stars in the upper sky: a few hundred fixed points, no fog.
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(260 * 3);
+  for (let i = 0; i < 260; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const y = 0.25 + Math.random() * 0.75;
+    const r = 200;
+    const horiz = Math.sqrt(1 - y * y);
+    starPos[i * 3] = Math.cos(a) * horiz * r;
+    starPos[i * 3 + 1] = y * r;
+    starPos[i * 3 + 2] = Math.sin(a) * horiz * r;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+    color: 0xcfd8ff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8,
+  }));
+  group.add(stars);
 
   // Site markers: glowing ring + letter sprite on the ground.
   for (const key of Object.keys(SITES)) {

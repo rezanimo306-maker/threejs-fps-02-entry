@@ -31,9 +31,11 @@ export function buildHud() {
     flash: $('hud-flash'),
     hint: $('hud-hint'),
     scope: $('scope-overlay'),
+    dmgDir: $('hud-dmg-dir'),
     lastFeedAt: -1,
     lastBanner: '',
     flashAt: -1,
+    dmgAt: -1,
   };
 }
 
@@ -112,12 +114,28 @@ export function updateHud(hud, sim, input) {
   // Sniper scope overlay.
   hud.scope.classList.toggle('on', !!(p.scoped && p.weapon === 'sniper'));
 
-  // Damage flash.
+  // Damage flash + direction: the wedge points at the attacker, so the
+  // player can turn toward the shot instead of spinning blind.
   if (p.lastDamageAt > hud.flashAt) {
     hud.flashAt = p.lastDamageAt;
     hud.flash.classList.remove('flash');
     void hud.flash.offsetWidth;
     hud.flash.classList.add('flash');
+    const from = p.lastDamageFrom;
+    if (from && from.pos && hud.dmgDir) {
+      const dx = from.pos.x - p.pos.x;
+      const dz = from.pos.z - p.pos.z;
+      // World bearing to the attacker, in the same yaw convention as
+      // turnToward: yaw = atan2(-dx, -dz). CSS rotate is clockwise
+      // positive, so the wedge turns by the negated relative angle.
+      let rel = Math.atan2(-dx, -dz) - p.yaw;
+      while (rel > Math.PI) rel -= Math.PI * 2;
+      while (rel < -Math.PI) rel += Math.PI * 2;
+      hud.dmgDir.style.transform = `rotate(${(-rel * 180 / Math.PI).toFixed(1)}deg)`;
+      hud.dmgDir.classList.remove('show');
+      void hud.dmgDir.offsetWidth;
+      hud.dmgDir.classList.add('show');
+    }
   }
 
   drawMinimap(hud, sim);

@@ -41,10 +41,33 @@ function botBody(team) {
   const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), suit);
   helmet.position.y = 1.62;
   g.add(helmet);
+  // The group's local -z is forward (rotation.y = yaw puts -sin/-cos,
+  // the shot direction, along local -z) — so the gun, arms and visor sit
+  // on the -z side and the backpack on the +z side. R3 had the gun at +z,
+  // pointing backwards.
   const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.85), gunmetal);
-  gun.position.set(0.3, 1.12, 0.35);
+  gun.position.set(0.3, 1.12, -0.35);
   gun.castShadow = true;
   g.add(gun);
+  // Arms reaching forward to hold the gun.
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.5), suit);
+  armL.position.set(-0.28, 1.12, -0.2);
+  armL.rotation.x = -0.35;
+  g.add(armL);
+  const armR = armL.clone();
+  armR.position.x = 0.28;
+  g.add(armR);
+  // Backpack on the back (+z), team dark.
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 0.18), dark);
+  pack.position.set(0, 1.0, 0.28);
+  pack.castShadow = true;
+  g.add(pack);
+  // Visor strip on the helmet front (-z), bright team colour so the
+  // facing reads at a glance.
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.06),
+    new THREE.MeshBasicMaterial({ color: TEAMS[team].color }));
+  visor.position.set(0, 1.62, -0.22);
+  g.add(visor);
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.55, 0.3), dark);
   legL.position.set(-0.18, 0.28, 0);
   g.add(legL);
@@ -55,27 +78,7 @@ function botBody(team) {
   return g;
 }
 
-function viewmodel() {
-  const g = new THREE.Group();
-  const metal = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
-  const accent = new THREE.MeshLambertMaterial({ color: 0x3fa7ff });
-  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.55), metal);
-  g.add(receiver);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.42, 8), metal);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.02, -0.45);
-  g.add(barrel);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.12), metal);
-  mag.position.set(0, -0.16, -0.05);
-  mag.rotation.x = 0.15;
-  g.add(mag);
-  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.07, 0.12), accent);
-  sight.position.set(0, 0.1, -0.1);
-  g.add(sight);
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.11, 0.22), metal);
-  stock.position.set(0, -0.01, 0.36);
-  g.add(stock);
-  // Muzzle flash: a starburst texture on a small plane at the barrel tip.
+function flashTexture() {
   const flashCanvas = document.createElement('canvas');
   flashCanvas.width = 64; flashCanvas.height = 64;
   const fg = flashCanvas.getContext('2d');
@@ -87,15 +90,108 @@ function viewmodel() {
   fg.closePath(); fg.fill();
   fg.fillStyle = '#fff3c4';
   fg.beginPath(); fg.arc(32, 32, 9, 0, Math.PI * 2); fg.fill();
-  const flashTex = new THREE.CanvasTexture(flashCanvas);
-  const flashMat = new THREE.MeshBasicMaterial({
-    map: flashTex, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false,
-  });
-  const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), flashMat);
-  flash.position.set(0, 0.02, -0.68);
-  g.add(flash);
-  g.userData = { flash, flashMat };
-  return g;
+  const t = new THREE.CanvasTexture(flashCanvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+let _sharedFlashTex = null;
+function sharedFlashTex() {
+  if (!_sharedFlashTex) _sharedFlashTex = flashTexture();
+  return _sharedFlashTex;
+}
+
+// One viewmodel per weapon, so the pistol stops looking like a rifle and
+// each gun reads at a glance in the first-person view. Each group carries
+// its base position and, except the grenade, its muzzle flash.
+function buildViewmodels() {
+  const metal = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
+  const metalLight = new THREE.MeshLambertMaterial({ color: 0x4a4e57 });
+  const accent = new THREE.MeshLambertMaterial({ color: 0x3fa7ff });
+  const olive = new THREE.MeshLambertMaterial({ color: 0x3a4a2a });
+  const out = {};
+  const mk = (key, base, build, flashAt, flashSize) => {
+    const g = new THREE.Group();
+    const box = (w, h, d, m, x, y, z, rx = 0) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+      mesh.position.set(x, y, z);
+      if (rx) mesh.rotation.x = rx;
+      g.add(mesh);
+      return mesh;
+    };
+    const cyl = (r, len, m, x, y, z, rx = Math.PI / 2) => {
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), m);
+      mesh.rotation.x = rx;
+      mesh.position.set(x, y, z);
+      g.add(mesh);
+      return mesh;
+    };
+    const add = (mesh) => { g.add(mesh); return mesh; };
+    build(box, cyl, add);
+    let flashMat = null;
+    if (flashAt) {
+      flashMat = new THREE.MeshBasicMaterial({
+        map: sharedFlashTex(), transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false,
+      });
+      const flash = new THREE.Mesh(new THREE.PlaneGeometry(flashSize, flashSize), flashMat);
+      flash.position.set(flashAt[0], flashAt[1], flashAt[2]);
+      g.add(flash);
+    }
+    g.userData = { flashMat, base };
+    out[key] = g;
+    return g;
+  };
+  // VK-47 Rifle: the R3 shape, refined with a lighter handguard.
+  mk('rifle', [0.28, -0.26, -0.55], (box, cyl) => {
+    box(0.09, 0.14, 0.55, metal, 0, 0, 0);
+    cyl(0.025, 0.42, metal, 0, 0.02, -0.45);
+    box(0.07, 0.22, 0.12, metal, 0, -0.16, -0.05, 0.15);
+    box(0.05, 0.07, 0.12, accent, 0, 0.1, -0.1);
+    box(0.08, 0.11, 0.22, metal, 0, -0.01, 0.36);
+    box(0.08, 0.1, 0.2, metalLight, 0, -0.05, -0.28);
+  }, [0, 0.02, -0.68], 0.22);
+  // K9 SMG: short and light, no stock, foregrip under the barrel.
+  mk('smg', [0.28, -0.25, -0.5], (box, cyl) => {
+    box(0.09, 0.12, 0.38, metal, 0, 0, 0);
+    cyl(0.02, 0.22, metal, 0, 0.02, -0.3);
+    box(0.06, 0.18, 0.1, metal, 0, -0.14, -0.02, 0.1);
+    box(0.06, 0.14, 0.08, metalLight, 0, -0.12, -0.22);
+    box(0.04, 0.05, 0.08, accent, 0, 0.09, -0.05);
+    box(0.07, 0.09, 0.12, metal, 0, -0.01, 0.22);
+  }, [0, 0.02, -0.44], 0.2);
+  // M12 Scattergun: wide receiver, thick barrel, pump under it.
+  mk('shotgun', [0.28, -0.27, -0.55], (box, cyl) => {
+    box(0.11, 0.15, 0.5, metal, 0, 0, 0);
+    cyl(0.045, 0.5, metal, 0, 0.03, -0.48);
+    box(0.09, 0.1, 0.22, metalLight, 0, -0.08, -0.35);
+    box(0.09, 0.12, 0.24, metal, 0, -0.01, 0.36);
+    box(0.02, 0.02, 0.02, accent, 0, 0.09, -0.3);
+  }, [0, 0.03, -0.78], 0.26);
+  // L86 Longshot: long thin barrel and a scope on top.
+  mk('sniper', [0.28, -0.25, -0.6], (box, cyl) => {
+    box(0.08, 0.12, 0.6, metal, 0, 0, 0);
+    cyl(0.028, 0.7, metal, 0, 0.02, -0.62);
+    cyl(0.05, 0.28, metalLight, 0, 0.11, -0.1);
+    box(0.02, 0.02, 0.02, accent, 0, 0.11, 0.05);
+    box(0.08, 0.11, 0.24, metal, 0, -0.01, 0.4);
+    box(0.06, 0.16, 0.1, metal, 0, -0.13, -0.05, 0.1);
+  }, [0, 0.02, -1.0], 0.26);
+  // P9 Sidearm: a small slide and grip, held lower and closer.
+  mk('pistol', [0.26, -0.3, -0.45], (box, cyl) => {
+    box(0.07, 0.09, 0.24, metal, 0, 0, 0);
+    box(0.06, 0.16, 0.08, metal, 0, -0.11, 0.08, 0.25);
+    box(0.03, 0.03, 0.05, metalLight, 0, 0.01, -0.14);
+    box(0.02, 0.03, 0.06, accent, 0, 0.06, -0.05);
+  }, [0, 0.01, -0.2], 0.16);
+  // Frag Grenade: a dark olive sphere with a pull ring, no muzzle flash.
+  mk('grenade', [0.26, -0.28, -0.5], (box, cyl, add) => {
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), olive);
+    add(ball);
+    box(0.02, 0.06, 0.02, metalLight, 0, 0.1, 0);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.008, 6, 12), metalLight);
+    ring.position.set(0.06, 0.1, 0);
+    add(ring);
+  }, null, 0);
+  return out;
 }
 
 export function createRenderState(scene, sim) {
@@ -111,10 +207,28 @@ export function createRenderState(scene, sim) {
     botGroups.set(e.id, g);
   }
 
-  // Viewmodel attached to the camera.
-  const vm = viewmodel();
-  vm.position.set(0.28, -0.26, -0.55);
-  camera.add(vm);
+  // Viewmodels, one per weapon; only the active weapon's is visible.
+  const vms = buildViewmodels();
+  for (const key of Object.keys(vms)) {
+    const b = vms[key].userData.base;
+    vms[key].position.set(b[0], b[1], b[2]);
+    vms[key].visible = false;
+    camera.add(vms[key]);
+  }
+  // Bot muzzle flashes: a pool of starburst billboards fed by the sim's
+  // flash pool (the sim already records every shot; R3 never drew them).
+  const botFlashes = [];
+  for (let i = 0; i < 8; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      map: sharedFlashTex(), transparent: true, opacity: 0,
+      side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.32), mat);
+    f.visible = false;
+    f.frustumCulled = false;
+    scene.add(f);
+    botFlashes.push(f);
+  }
 
   // Muzzle light for the player's shots.
   const muzzleLight = new THREE.PointLight(0xffc27a, 0, 9, 2);
@@ -170,7 +284,7 @@ export function createRenderState(scene, sim) {
   bomb.visible = false;
   scene.add(bomb);
 
-  return { camera, botGroups, vm, muzzleLight, tracers, impacts, blasts, bomb, walkT: 0 };
+  return { camera, scene, botGroups, vms, botFlashes, muzzleLight, tracers, impacts, blasts, bomb, walkT: 0 };
 }
 
 export function syncRender(rs, sim, dt, now) {
@@ -213,25 +327,49 @@ export function syncRender(rs, sim, dt, now) {
     cam.updateProjectionMatrix();
   }
 
-  // Viewmodel: walk bob, recoil kick, reload dip.
+  // Viewmodel: the active weapon's model only, with walk bob, recoil
+  // kick and a reload dip, each relative to that weapon's base pose.
   rs.walkT += dt * (p.moving > 0.5 ? p.moving * 1.6 : 0);
   const bobY = Math.sin(rs.walkT * 2) * 0.012 * Math.min(1, p.moving / 4);
   const bobX = Math.cos(rs.walkT) * 0.008 * Math.min(1, p.moving / 4);
-  rs.vm.position.set(0.28 + bobX, -0.26 + bobY, -0.55 + (p.recoil || 0) * 1.6);
-  rs.vm.rotation.x = (p.recoil || 0) * 1.4;
-  if (p.reloading) rs.vm.position.y -= 0.12;
-  rs.vm.visible = p.alive;
+  const activeVm = rs.vms[p.weapon] || rs.vms.rifle;
+  for (const key of Object.keys(rs.vms)) rs.vms[key].visible = false;
+  const base = activeVm.userData.base;
+  activeVm.position.set(base[0] + bobX, base[1] + bobY, base[2] + (p.recoil || 0) * 1.6);
+  activeVm.rotation.x = (p.recoil || 0) * 1.4;
+  if (p.reloading) activeVm.position.y -= 0.12;
+  activeVm.visible = p.alive;
   // Muzzle flash on a fresh PLAYER shot only (bots' shots light their own
   // tracers, not the viewmodel).
   const playerFired = p.lastShot > 0 && sim.time - p.lastShot < 0.06;
-  rs.vm.userData.flashMat.opacity = playerFired ? 0.95 : 0;
+  if (activeVm.userData.flashMat) activeVm.userData.flashMat.opacity = playerFired ? 0.95 : 0;
   rs.muzzleLight.intensity = playerFired ? 26 : 0;
 
-  // Bots.
+  // Bot muzzle flashes: billboard the sim's flash pool at each shot's
+  // position (player shots are skipped — the viewmodel flash covers them).
+  for (let i = 0; i < rs.botFlashes.length; i++) {
+    const f = rs.botFlashes[i];
+    const t = sim.flashes.items[i];
+    if (!t || t.ttl <= 0 || t.byPlayer) { f.visible = false; continue; }
+    f.visible = true;
+    f.position.set(t.x, t.y, t.z);
+    f.lookAt(cam.position);
+    f.material.opacity = Math.min(1, t.ttl / t.maxTtl);
+  }
+
+  // Bots. Groups are created lazily: createRenderState runs at load when
+  // sim.entities is still empty (spawnTeams only runs on startMatch), so
+  // R3 built no groups at all and every bot was invisible — the sim
+  // played but the yard looked empty. A group is made the first frame its
+  // entity is seen and kept (ids are stable across rounds, same teams).
   for (const e of sim.entities) {
     if (e.isPlayer) continue;
-    const g = rs.botGroups.get(e.id);
-    if (!g) continue;
+    let g = rs.botGroups.get(e.id);
+    if (!g) {
+      g = botBody(e.team);
+      rs.scene.add(g);
+      rs.botGroups.set(e.id, g);
+    }
     g.visible = true;
     if (!e.alive) {
       // Fallen: lie on the side.
