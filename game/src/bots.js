@@ -322,18 +322,23 @@ function think(sim, bot, now, rng) {
   }
 
   // Attackers follow the charge carrier so the plant is a team push, not
-  // a lone walk into two defenders: route to the carrier's position
-  // (routeTo re-plans as it moves), and only spread to the site once
-  // close to the carrier. Without this the escorts take different lanes,
-  // arrive at different times, and the carrier plants alone or dies
-  // alone while the team is scattered.
+  // a lone walk into two defenders — and they clear AHEAD of it. The
+  // carrier used to walk point into every held angle and die in mid-map,
+  // 17–33 m short of the site, while its escorts trailed behind it. Now
+  // the escorts route to a point 6 m past the carrier toward the site, so
+  // the carrier is never the first bot into a defender's sightline.
   if (bot.team === 'vanguard' && !bot.hasBomb) {
     const carrier = sim.entities.find((e) => e.team === 'vanguard' && e.hasBomb);
-    if (carrier) {
-      const dc = Math.hypot(carrier.pos.x - bot.pos.x, carrier.pos.z - bot.pos.z);
-      if (dc > 6) {
+    if (carrier && carrier.assignedSite) {
+      const s = sim.sites[carrier.assignedSite];
+      const dx = s.x - carrier.pos.x; const dz = s.z - carrier.pos.z;
+      const dl = Math.hypot(dx, dz) || 1;
+      const tx = carrier.pos.x + (dx / dl) * 6;
+      const tz = carrier.pos.z + (dz / dl) * 6;
+      const dc = Math.hypot(tx - bot.pos.x, tz - bot.pos.z);
+      if (dc > 3) {
         bot.state = 'route';
-        routeTo(sim, bot, carrier.pos.x, carrier.pos.z);
+        routeTo(sim, bot, tx, tz);
         return;
       }
     }
