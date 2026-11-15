@@ -15,12 +15,15 @@ const BOXES = [
   // Mid wall with a door gap at x in [-2.5, 2.5].
   { x: -12, z: 0, w: 19, d: 1, h: 4.5, c: PALETTE.wallTrim },
   { x: 12, z: 0, w: 19, d: 1, h: 4.5, c: PALETTE.wallTrim },
-  // A-long cover.
-  { x: -24, z: 8, w: 6, d: 2.4, h: 2.4, c: PALETTE.containerTeal },
+  // A-long cover. These sit at x ±28, off the lane itself: centred on the
+  // lane (x ±24) they blocked the waypoint edge between the south and mid
+  // waypoints, and a bot routed down the lane pressed against the
+  // container's north face forever instead of reaching the site.
+  { x: -28, z: 8, w: 6, d: 2.4, h: 2.4, c: PALETTE.containerTeal },
   { x: -27, z: -4, w: 2.4, d: 6, h: 2.4, c: PALETTE.containerRust },
   { x: -21, z: -10, w: 2, d: 2, h: 1.1, c: PALETTE.crate },
   // B-side cover.
-  { x: 24, z: 8, w: 6, d: 2.4, h: 2.4, c: PALETTE.containerSand },
+  { x: 28, z: 8, w: 6, d: 2.4, h: 2.4, c: PALETTE.containerSand },
   { x: 27, z: -4, w: 2.4, d: 6, h: 2.4, c: PALETTE.containerTeal },
   { x: 21, z: -10, w: 2, d: 2, h: 1.1, c: PALETTE.crate },
   // Mid cover.
@@ -36,9 +39,11 @@ const BOXES = [
   { x: 28, z: -16, w: 2.4, d: 6, h: 2.4, c: PALETTE.containerRust },
   { x: 20, z: -19, w: 6, d: 2.4, h: 2.4, c: PALETTE.containerTeal },
   { x: 24, z: -12, w: 2, d: 2, h: 1.1, c: PALETTE.crate },
-  // Connector blocks.
-  { x: -14, z: 12, w: 4, d: 2, h: 1.1, c: PALETTE.crate },
-  { x: 14, z: 12, w: 4, d: 2, h: 1.1, c: PALETTE.crate },
+  // Connector blocks. They sit at z 16, clear of waypoints 17/18 (±12, 12):
+  // a crate on a waypoint's edge traps any bot routed through it, and the
+  // bomb carrier would never reach a site.
+  { x: -14, z: 16, w: 4, d: 2, h: 1.1, c: PALETTE.crate },
+  { x: 14, z: 16, w: 4, d: 2, h: 1.1, c: PALETTE.crate },
   { x: -14, z: -6, w: 2, d: 2, h: 1.1, c: PALETTE.crate },
   { x: 14, z: -6, w: 2, d: 2, h: 1.1, c: PALETTE.crate },
   // Barrels (cylinders, drawn as boxes in collision).
