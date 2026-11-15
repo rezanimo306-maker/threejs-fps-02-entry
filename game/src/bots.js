@@ -47,6 +47,8 @@ function nearestVisible(sim, bot) {
   // map, so at 60 m both teams would open a 40 m firefight from their
   // spawns and never push the objective. At 35 m a bot only engages once
   // it is close enough for the fight to matter, and it routes first.
+  // (28 m was tried and reverted: bots walked past each other without
+  // engaging and 91% of rounds timed out.)
   let best = null; let bestD = 35;
   for (let i = 0; i < sim.entities.length; i++) {
     const e = sim.entities[i];
