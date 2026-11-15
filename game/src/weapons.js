@@ -7,15 +7,26 @@ import { WEAPONS, ARMOR_PRICE } from './config.js';
 // An entity's weapon state lives on the entity: weapon (key), mag, reserve,
 // grenades, bloom (degrees of extra spread), recoil (radians of pitch kick),
 // reloading (bool), reloadEnd (sim time), lastShot (sim time).
-export function defaultLoadout() {
-  return { primary: 'pistol', sidearm: 'pistol', grenades: 0, armor: false };
+// Ammo is kept PER WEAPON in ent.ammo: switching weapons restores what that
+// weapon had left instead of refilling it (a switch used to hand back a
+// full magazine and reserve, so ammunition never really ran out).
+export function saveAmmo(ent) {
+  if (!ent.ammo) ent.ammo = {};
+  ent.ammo[ent.weapon] = { mag: ent.mag, reserve: ent.reserve };
 }
 
 export function giveWeapon(ent, key) {
   const w = WEAPONS[key];
+  saveAmmo(ent); // keep the outgoing weapon's ammunition
   ent.weapon = key;
-  ent.mag = w.mag;
-  ent.reserve = w.reserve;
+  if (!ent.ammo) ent.ammo = {};
+  const saved = ent.ammo[key];
+  if (saved) { ent.mag = saved.mag; ent.reserve = saved.reserve; }
+  else {
+    ent.mag = w.mag;
+    ent.reserve = w.reserve;
+    ent.ammo[key] = { mag: w.mag, reserve: w.reserve };
+  }
   ent.bloom = 0;
   ent.reloading = false;
 }
@@ -32,6 +43,10 @@ export function buyWeapon(ent, key) {
   ent.money -= w.price;
   if (w.slot === 'primary') ent.primary = key;
   else ent.sidearm = key;
+  // A fresh purchase comes with full ammunition, whatever that weapon
+  // had left before.
+  if (!ent.ammo) ent.ammo = {};
+  ent.ammo[key] = { mag: w.mag, reserve: w.reserve };
   giveWeapon(ent, key);
   return true;
 }
