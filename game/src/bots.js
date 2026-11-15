@@ -287,9 +287,11 @@ function think(sim, bot, now, rng) {
     // close enough to threaten the plant — but not through gunfire aimed
     // at it: a carrier that kept walking while being shot died in
     // mid-map, 17–33 m short of the site, in most rounds. Under fire it
-    // stops and returns fire, and it engages anyone inside 18 m.
+    // stops and returns fire, and it engages anyone inside 10 m; further
+    // out it keeps sprinting for the site instead of duelling across
+    // the map.
     const underFire = now - bot.lastDamageAt < 2;
-    const pushing = bot.hasBomb && bot.assignedSite && seen.dist > 18 && !underFire;
+    const pushing = bot.hasBomb && bot.assignedSite && seen.dist > 10 && !underFire;
     if (!pushing) {
       if (bot.target !== seen.ent) { bot.target = seen.ent; bot.firstSeenAt = now; }
       bot.state = 'engage';
