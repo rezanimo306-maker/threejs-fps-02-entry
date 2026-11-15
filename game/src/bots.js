@@ -18,10 +18,11 @@ export function createBot(id, team, spawn, skill, name) {
     hp: 100, armor: false, alive: true,
     weapon: 'pistol', primary: 'pistol', sidearm: 'pistol',
     mag: 12, reserve: 48, grenades: 0, bloom: 0, recoil: 0,
+    ammo: { pistol: { mag: 12, reserve: 48 } }, // per-weapon ammunition
     reloading: false, reloadEnd: 0, lastShot: -10,
     money: 800, kills: 0, deaths: 0,
     crouched: false, onGround: true, moving: 0, height: 1.7,
-    skill, state: 'route', route: [], routeIdx: 0,
+    skill, state: 'route', route: [], routeIdx: 0, routeTarget: null,
     target: null, firstSeenAt: 0, burstLeft: 0, burstPauseUntil: 0,
     holdUntil: 0, holdPos: null, thinkAt: 0, aimYaw: 0, aimPitch: 0,
     assignedSite: null, hasBomb: false, planting: 0, defusing: 0,
@@ -41,7 +42,11 @@ export function botBuy(bot, rng) {
 }
 
 function nearestVisible(sim, bot) {
-  let best = null; let bestD = 60;
+  // Vision range 35 m: the mid door gives a line of sight across the whole
+  // map, so at 60 m both teams would open a 40 m firefight from their
+  // spawns and never push the objective. At 35 m a bot only engages once
+  // it is close enough for the fight to matter, and it routes first.
+  let best = null; let bestD = 35;
   for (let i = 0; i < sim.entities.length; i++) {
     const e = sim.entities[i];
     if (e.team === bot.team || !e.alive) continue;
@@ -73,6 +78,19 @@ function aimError(bot, dist, targetSpeed) {
   return base + dist * 0.0009 + targetSpeed * 0.004;
 }
 
+// (Re)plan a route only when the bot has none or its destination moved:
+// re-planning every think tick resets routeIdx to the nearest waypoint, so
+// the bot oscillates around that waypoint instead of advancing along the
+// route — the carrier would never reach a site. A kept route is followed
+// to its end; a finished route is empty, so the next plan happens then.
+function routeTo(sim, bot, tx, tz) {
+  const cur = bot.routeTarget;
+  if (bot.route.length > 0 && cur && Math.hypot(cur.x - tx, cur.z - tz) < 4) return;
+  bot.route = findRoute(sim.waypoints, sim.edges, bot.pos.x, bot.pos.z, tx, tz);
+  bot.routeIdx = 0;
+  bot.routeTarget = { x: tx, z: tz };
+}
+
 export function stepBot(sim, bot, dt, now, rng) {
   if (!bot.alive) return;
 
@@ -94,10 +112,15 @@ export function stepBot(sim, bot, dt, now, rng) {
     const fireYaw = bot.yaw + (rng() - 0.5) * 2 * err;
     const firePitch = bot.pitch + (rng() - 0.5) * 2 * err;
     const saveYaw = bot.yaw; const savePitch = bot.pitch;
-    // Strafe while fighting, sometimes crouch.
+    // Strafe while fighting, sometimes crouch. Attackers at long range
+    // (>15 m) close the distance while shooting instead of strafing in
+    // place: a bot that stands still trading shots across the map never
+    // reaches the objective, and the round stalls on time. Defenders
+    // hold their angle and strafe — they let the push come to them.
     const strafe = Math.sin(now * 0.9 + bot.id * 2.1) > 0.2 ? 1 : -1;
-    const mx = Math.cos(bot.yaw) * strafe;
-    const mz = -Math.sin(bot.yaw) * strafe;
+    const advance = bot.team === 'vanguard' && dist > 15 ? 0.9 : 0;
+    const mx = Math.cos(bot.yaw) * strafe + (dx / dist) * advance;
+    const mz = -Math.sin(bot.yaw) * strafe + (dz / dist) * advance;
     moveBot(sim, bot, mx, mz, dt, RUN_SPEED * 0.55);
     if (now > bot.burstPauseUntil) {
       if (bot.burstLeft <= 0) {
@@ -120,6 +143,14 @@ export function stepBot(sim, bot, dt, now, rng) {
   } else if (bot.state === 'defuse') {
     bot.defusing += dt;
     if (bot.defusing >= DEFUSE_TIME) sim.onDefuseComplete(bot);
+  } else if (bot.state === 'fetch') {
+    // Steer straight at the dropped charge; step() picks it up inside 1.4 m.
+    const dx = sim.bomb.x - bot.pos.x; const dz = sim.bomb.z - bot.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.1) {
+      moveBot(sim, bot, dx / d, dz / d, dt, RUN_SPEED * 0.85);
+      bot.yaw = Math.atan2(-dx, -dz);
+    }
   } else if (bot.route.length > 0) {
     // Follow the waypoint route.
     const wp = sim.waypoints[bot.route[bot.routeIdx]];
@@ -173,11 +204,15 @@ function think(sim, bot, now, rng) {
   // Bomb states override routing.
   if (sim.bomb.state === 'planted') {
     if (bot.team === 'ember') {
-      bot.state = 'route';
-      bot.route = findRoute(sim.waypoints, sim.edges, bot.pos.x, bot.pos.z, sim.bomb.x, sim.bomb.z);
-      bot.routeIdx = 0;
       const d = Math.hypot(sim.bomb.x - bot.pos.x, sim.bomb.z - bot.pos.z);
-      if (d < 2.2) { bot.state = 'defuse'; bot.defusing = 0; }
+      if (d < 2.2) {
+        // Start the defuse once: resetting defusing on every think tick
+        // would never let it reach DEFUSE_TIME.
+        if (bot.state !== 'defuse') { bot.state = 'defuse'; bot.defusing = 0; }
+        return;
+      }
+      bot.state = 'route';
+      routeTo(sim, bot, sim.bomb.x, sim.bomb.z);
       return;
     }
     // Vanguard holds the planted site.
@@ -185,13 +220,39 @@ function think(sim, bot, now, rng) {
     return;
   }
 
-  // Visible enemy beats everything else.
+  // Visible enemy, and a dropped charge. The charge is the objective, so
+  // the fetch is checked first — but a bot in a fight only breaks off
+  // for a charge close enough to grab safely (inside 8 m): sending a
+  // fighting bot across the map to a distant charge feeds it to the
+  // defenders one by one, while a charge lying at the team's feet while
+  // everyone shoots is a round lost on time.
   const seen = nearestVisible(sim, bot);
+  if (sim.bomb.state === 'dropped' && bot.team === 'vanguard') {
+    let nearest = null; let nd = 1e9;
+    for (const e of sim.entities) {
+      if (e.team !== 'vanguard' || !e.alive) continue;
+      const dd = Math.hypot(sim.bomb.x - e.pos.x, sim.bomb.z - e.pos.z);
+      if (e.state === 'engage' && dd > 8) continue;
+      if (dd < nd) { nd = dd; nearest = e; }
+    }
+    if (nearest === bot) {
+      if (nd < 5) { bot.state = 'fetch'; return; }
+      bot.state = 'route';
+      routeTo(sim, bot, sim.bomb.x, sim.bomb.z);
+      return;
+    }
+  }
   if (seen) {
-    if (bot.target !== seen.ent) { bot.target = seen.ent; bot.firstSeenAt = now; }
-    bot.state = 'engage';
-    bot.planting = 0; bot.defusing = 0;
-    return;
+    // The charge carrier pushes to the site and only stops for a fight
+    // close enough to threaten the plant (14 m: a defender further out
+    // is a long-range trade the carrier can survive while closing).
+    const pushing = bot.hasBomb && bot.assignedSite && seen.dist > 14;
+    if (!pushing) {
+      if (bot.target !== seen.ent) { bot.target = seen.ent; bot.firstSeenAt = now; }
+      bot.state = 'engage';
+      bot.planting = 0; bot.defusing = 0;
+      return;
+    }
   }
   bot.target = null;
 
@@ -199,10 +260,14 @@ function think(sim, bot, now, rng) {
   if (bot.hasBomb && bot.assignedSite) {
     const s = sim.sites[bot.assignedSite];
     const d = Math.hypot(s.x - bot.pos.x, s.z - bot.pos.z);
-    if (d < s.r * 0.8) { bot.state = 'plant'; bot.planting = 0; return; }
+    if (d < s.r * 0.8) {
+      // Start the plant once: resetting planting on every think tick
+      // would never let it reach PLANT_TIME.
+      if (bot.state !== 'plant') { bot.state = 'plant'; bot.planting = 0; }
+      return;
+    }
     bot.state = 'route';
-    bot.route = findRoute(sim.waypoints, sim.edges, bot.pos.x, bot.pos.z, s.x, s.z);
-    bot.routeIdx = 0;
+    routeTo(sim, bot, s.x, s.z);
     return;
   }
 
@@ -212,9 +277,26 @@ function think(sim, bot, now, rng) {
     const d = Math.hypot(heard.x - bot.pos.x, heard.z - bot.pos.z);
     if (d < 26 && bot.state !== 'engage') {
       bot.state = 'route';
-      bot.route = findRoute(sim.waypoints, sim.edges, bot.pos.x, bot.pos.z, heard.x, heard.z);
-      bot.routeIdx = 0;
+      routeTo(sim, bot, heard.x, heard.z);
       return;
+    }
+  }
+
+  // Attackers follow the charge carrier so the plant is a team push, not
+  // a lone walk into two defenders: route to the carrier's position
+  // (routeTo re-plans as it moves), and only spread to the site once
+  // close to the carrier. Without this the escorts take different lanes,
+  // arrive at different times, and the carrier plants alone or dies
+  // alone while the team is scattered.
+  if (bot.team === 'vanguard' && !bot.hasBomb) {
+    const carrier = sim.entities.find((e) => e.team === 'vanguard' && e.hasBomb);
+    if (carrier) {
+      const dc = Math.hypot(carrier.pos.x - bot.pos.x, carrier.pos.z - bot.pos.z);
+      if (dc > 6) {
+        bot.state = 'route';
+        routeTo(sim, bot, carrier.pos.x, carrier.pos.z);
+        return;
+      }
     }
   }
 
@@ -239,7 +321,11 @@ function assignRoute(sim, bot, rng) {
     if (site) { tx = sim.sites[site].x; tz = sim.sites[site].z; }
     else { tx = 0; tz = -8; }
   } else {
-    const site = bot.assignedSite || sites[Math.floor(rng() * 2)];
+    // Attackers push together: when a teammate carries the charge, the
+    // whole team routes to that carrier's site, so the plant is a team
+    // push instead of a lone walk into two defenders.
+    const carrier = sim.entities.find((e) => e.team === 'vanguard' && e.hasBomb);
+    const site = (carrier && carrier.assignedSite) || bot.assignedSite || sites[Math.floor(rng() * 2)];
     tx = sim.sites[site].x + (rng() - 0.5) * 3;
     tz = sim.sites[site].z + (rng() - 0.5) * 3;
   }
