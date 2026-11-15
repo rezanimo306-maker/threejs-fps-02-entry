@@ -67,7 +67,7 @@ export function updateHud(hud, sim, input) {
   hud.crosshair.style.setProperty('--gap', `${spread.toFixed(1)}px`);
 
   // Bomb status line.
-  if (p.hasBomb) hud.bomb.textContent = 'YOU CARRY THE CHARGE — reach Site A or B, hold E to plant';
+  if (p.hasBomb) hud.bomb.textContent = `YOU CARRY THE CHARGE — reach Site ${p.assignedSite || 'A or B'}, hold E to plant`;
   else if (sim.bomb.state === 'planted') hud.bomb.textContent = `CHARGE PLANTED AT SITE ${sim.bomb.site} — ${Math.ceil(sim.bomb.timer)}s`;
   else if (sim.bomb.state === 'dropped') hud.bomb.textContent = 'CHARGE DROPPED — walk over it to pick it up';
   else hud.bomb.textContent = '';
