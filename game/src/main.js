@@ -6,7 +6,7 @@ import { createSim, startMatch, step, STEP } from './sim.js';
 import { createRenderer, createRenderState, syncRender } from './render.js';
 import { createPlayerInput, attachInput, requestLock } from './player.js';
 import { buildHud, updateHud, showHitmarker } from './hud.js';
-import { initAudio, resumeAudio } from './audio.js';
+import { initAudio, resumeAudio, playHit, playBuy } from './audio.js';
 import { buyWeapon, buyArmor } from './weapons.js';
 
 const canvas = document.getElementById('game');
@@ -38,8 +38,8 @@ const rs = createRenderState(scene, sim);
 const hud = buildHud();
 initAudio();
 
-// Hitmarker hook for the combat module.
-sim.onHit = (head) => showHitmarker(hud, head);
+// Hitmarker hook for the combat module: a marker and a tick on every hit.
+sim.onHit = (head) => { showHitmarker(hud, head); playHit(); };
 
 // --- input ---
 let locked = false;
@@ -90,8 +90,8 @@ document.querySelectorAll('#buy-menu [data-buy]').forEach((btn) => {
     const p = sim.player;
     if (!p || sim.phase !== 'buy') return;
     const kind = btn.getAttribute('data-buy');
-    if (kind === 'armor') buyArmor(p);
-    else buyWeapon(p, kind);
+    const ok = kind === 'armor' ? buyArmor(p) : buyWeapon(p, kind);
+    if (ok) playBuy();
   });
 });
 
@@ -141,5 +141,5 @@ window.__DUSKLINE__ = {
   // Freeze the page's own loop so a test can drive the sim step by step.
   pause: (v) => { paused = v; },
   step: (n = 1) => { for (let i = 0; i < n; i++) step(sim, input, STEP); },
-  version: '0.1.0',
+  version: '0.3.0',
 };
